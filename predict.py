@@ -4,11 +4,19 @@ import mediapipe as mp
 import numpy as np
 import time
 
-
 model_dict = pickle.load(open('./model.p', 'rb'))
 model = model_dict['model']
 
+logo = cv2.imread("signmeup_new-removebg-preview.png", cv2.IMREAD_UNCHANGED)
+
+if logo is not None:
+    logo_width = 150
+    scale_ratio = logo_width / logo.shape[1]
+    logo_height = int(logo.shape[0] * scale_ratio)
+    logo = cv2.resize(logo, (logo_width, logo_height))
+
 cap = cv2.VideoCapture(0)
+
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
 mp_drawing_styles = mp.solutions.drawing_styles
@@ -82,11 +90,12 @@ while True:
 
         if predicted_character == last_prediction:
             if current_time - prediction_start_time > 1:
+
                 if sentence_finished and predicted_character != ".":
                     sentence = ""
                     sentence_finished = False
                     last_added_character = None
-     
+
                 if predicted_character != last_added_character:
 
                     if predicted_character == ".":
@@ -141,6 +150,27 @@ while True:
         3,
         cv2.LINE_AA
     )
+
+    if logo is not None:
+        h_logo, w_logo = logo.shape[:2]
+        x_offset = W - w_logo - 10
+        y_offset = 10
+        opacity = 0.4
+
+        roi = frame[y_offset:y_offset+h_logo, x_offset:x_offset+w_logo]
+
+        if logo.shape[2] == 4:
+            logo_bgr = logo[:, :, :3]
+            alpha = (logo[:, :, 3] / 255.0) * opacity
+
+            for c in range(3):
+                roi[:, :, c] = (
+                    alpha * logo_bgr[:, :, c] +
+                    (1 - alpha) * roi[:, :, c]
+                )
+        else:
+            blended = cv2.addWeighted(logo, opacity, roi, 1 - opacity, 0)
+            roi[:] = blended
 
     cv2.imshow('Hand Tracking', frame)
 
