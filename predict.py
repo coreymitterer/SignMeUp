@@ -2,23 +2,23 @@ import pickle
 import cv2
 import mediapipe as mp
 import numpy as np
+import time
 
-# Load model
+
 model_dict = pickle.load(open('./model.p', 'rb'))
 model = model_dict['model']
 
-# Initialize video capture
 cap = cv2.VideoCapture(0)
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
 mp_drawing_styles = mp.solutions.drawing_styles
+
 hands = mp_hands.Hands(
     static_image_mode=False,
     max_num_hands=1,
     min_detection_confidence=0.3
 )
 
-# Labels dictionary (MAKE SURE this matches your training labels)
 labels_dict = {
     0: 'Yes', 1: 'No', 2: 'Thank you', 3: "Love", 4: "Help",
     5: "More", 6: "Name", 7: "Stop", 8: "Eat", 9: "My",
@@ -30,6 +30,11 @@ labels_dict = {
     38: "Y", 39: "Z", 40: "For", 41: "Watch", 42: "Hello", 43: "."
 }
 
+last_prediction = None
+prediction_start_time = 0
+sentence = ""
+sentence_finished = False
+last_added_character = None
 
 while True:
     ret, frame = cap.read()
@@ -43,7 +48,6 @@ while True:
     if results.multi_hand_landmarks:
         hand_landmarks = results.multi_hand_landmarks[0]
 
-        # Draw landmarks
         mp_drawing.draw_landmarks(
             frame,
             hand_landmarks,
@@ -52,17 +56,14 @@ while True:
             mp_drawing_styles.get_default_hand_connections_style()
         )
 
-        # Extract x and y coordinates
         x_ = [lm.x for lm in hand_landmarks.landmark]
         y_ = [lm.y for lm in hand_landmarks.landmark]
 
-        # Normalize landmarks
         data_aux = []
         for lm in hand_landmarks.landmark:
             data_aux.append(lm.x - min(x_))
             data_aux.append(lm.y - min(y_))
 
-        # Ensure fixed length (84 features)
         while len(data_aux) < 84:
             data_aux.append(0)
         if len(data_aux) > 84:
@@ -70,17 +71,40 @@ while True:
 
         data_array = np.asarray(data_aux)
 
-        # Make prediction
         prediction = model.predict([data_array])
         predicted_index = int(prediction[0])
+        predicted_character = labels_dict.get(
+            predicted_index,
+            f"Class {predicted_index}"
+        )
 
-        # Safe label lookup
-        if predicted_index in labels_dict:
-            predicted_character = labels_dict[predicted_index]
+        current_time = time.time()
+
+        if predicted_character == last_prediction:
+            if current_time - prediction_start_time > 1:
+                if sentence_finished and predicted_character != ".":
+                    sentence = ""
+                    sentence_finished = False
+                    last_added_character = None
+     
+                if predicted_character != last_added_character:
+
+                    if predicted_character == ".":
+                        sentence += "."
+                        sentence_finished = True
+                    else:
+                        if len(predicted_character) == 1:
+                            sentence += predicted_character
+                        else:
+                            sentence += predicted_character + " "
+
+                    last_added_character = predicted_character
+
+                prediction_start_time = current_time
         else:
-            predicted_character = f"Class {predicted_index}"
+            last_prediction = predicted_character
+            prediction_start_time = current_time
 
-        # Get prediction confidence (if supported)
         if hasattr(model, "predict_proba"):
             proba = model.predict_proba([data_array])
             confidence = np.max(proba)
@@ -89,7 +113,6 @@ while True:
 
         text_to_show = f"{predicted_character} ({confidence*100:.1f}%)"
 
-        # Draw bounding box
         x1 = int(min(x_) * W) - 10
         y1 = int(min(y_) * H) - 10
         x2 = int(max(x_) * W) + 10
@@ -107,9 +130,20 @@ while True:
             cv2.LINE_AA
         )
 
+    cv2.rectangle(frame, (0, H - 70), (W, H), (255, 255, 255), -1)
+    cv2.putText(
+        frame,
+        sentence,
+        (10, H - 25),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1.2,
+        (0, 0, 0),
+        3,
+        cv2.LINE_AA
+    )
+
     cv2.imshow('Hand Tracking', frame)
 
-    # Press ESC to exit
     if cv2.waitKey(1) & 0xFF == 27:
         break
 
